@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     mongo_password: str = Field(..., env="MONGO_PASSWORD")
     mongo_host: str = Field(..., env="MONGO_HOST")
     mongo_db: str = Field(..., env="MONGO_DB")
+    secret_key: str = Field(..., env="SECRET_KEY")
 
     @property
     def mongo_url(self) -> str:

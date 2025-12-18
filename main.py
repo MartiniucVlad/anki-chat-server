@@ -1,38 +1,36 @@
-# main.py (NEW/RECOMMENDED)
-import contextlib
+# main.py
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware # <--- IMPORTS MUST BE HERE
 from database import connect_to_mongo, close_mongo_connection
 from routers.users import router as users_router
-
-
-# --- 1. Define the Lifespan Context Manager ---
+from routers.friends import router as friends_router
+from routers.chat import router as chat_router
+import contextlib
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- Startup Logic ---
-    print("Application startup: Connecting DB...")
+    print("Startup: Connecting to DB...")
     await connect_to_mongo()
-
-    # The 'yield' pauses execution, and the application starts serving requests.
     yield
-
-    # --- Shutdown Logic (Executed after the application stops serving) ---
-    print("Application shutdown: Closing DB connection...")
+    print("Shutdown: Closing DB...")
     await close_mongo_connection()
 
+app = FastAPI(lifespan=lifespan)
 
-# --- 2. Pass the lifespan function to FastAPI ---
-app = FastAPI(
-    title="Mega App Backend",
-    description="User profiles, chat, and interactive games.",
-    # IMPORTANT: Pass the new lifespan function here
-    lifespan=lifespan
+# --- CORS SETTINGS ---
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],        # Allows ALL origins (easiest for dev)
+    allow_credentials=True,
+    allow_methods=["*"],        # Allows all methods (POST, GET, OPTIONS, etc.)
+    allow_headers=["*"],        # Allows all headers
 )
 
-# --- Routers ---
 app.include_router(users_router)
+app.include_router(friends_router)
+app.include_router(chat_router)
 
-
-@app.get("/", tags=["Root"])
+@app.get("/")
 async def root():
-    return {"message": "Welcome to the Mega App API! Go to /docs for more info."}
+    return {"message": "Server is running"}

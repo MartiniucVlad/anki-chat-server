@@ -3,7 +3,8 @@ from pydantic import BaseModel, EmailStr, Field
 from pydantic_core import core_schema, PydanticCustomError
 from typing import Any, Optional
 from bson import ObjectId
-
+from typing import Optional, List
+from datetime import datetime, timezone
 
 # --- MongoDB Helper for Pydantic V2 ---
 
@@ -59,6 +60,7 @@ class UserInDB(BaseModel):
     username: str = Field(..., min_length=3, max_length=20)
     email: EmailStr
     hashed_password: str
+    friends: List[str] = Field(default_factory=list)
 
     class Config:
         # Renamed in V2: 'allow_population_by_field_name' -> 'validate_by_name'
@@ -87,3 +89,40 @@ class UserProfile(BaseModel):
     email: EmailStr
     bio: Optional[str] = "No bio yet."
 
+# 4. Schema for Login Input
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+# 5. Schema for the Token Response
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+# 6. Schema for a Friend Request
+class FriendRequestInDB(BaseModel):
+    sender: str
+    receiver: str
+    status: str = "pending"  # pending, accepted, rejected
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+# 7. Schema for displaying a Friend Request to the user
+class FriendRequestOut(BaseModel):
+    id: str = Field(alias="_id")
+    sender: str
+    timestamp: datetime
+
+# 8. How the message looks in the Database
+class MessageInDB(BaseModel):
+    conversation_id: str
+    sender: str
+    content: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+# 9. How the message looks when sent to the Frontend
+class MessageOut(BaseModel):
+    sender: str
+    content: str
+    timestamp: datetime
