@@ -8,6 +8,7 @@ from jose import jwt, JWTError
 from config import settings
 from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 
 # 1. Load the environment variables from the .env file
 load_dotenv()
@@ -20,7 +21,7 @@ if not SECRET_KEY:
     raise ValueError("No SECRET_KEY found in .env file")
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
@@ -39,21 +40,50 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    """Generates a JWT token containing user data."""
+    """Generates a short-lived Access Token (15 mins)"""
     to_encode = data.copy()
-
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    # Add expiration time to the token data
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "type": "access"})  # Add 'type' claim
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-    # Create the encoded JWT string
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
 
+def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None):
+    """Generates a long-lived Refresh Token (7 days)"""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+
+    to_encode.update({"exp": expire, "type": "refresh"})  # Add 'type' claim
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+async def verify_refresh_token(token: str):
+    """
+    Decodes the refresh token and returns the username (sub).
+    Raises 401 if invalid or expired.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate refresh token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        token_type: str = payload.get("type")
+
+        if username is None or token_type != "refresh":
+            raise credentials_exception
+
+        return username
+    except JWTError:
+        raise credentials_exception
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 

@@ -6,7 +6,7 @@ from models import UserRegister, UserInDB, UserProfile, UserLogin, Token
 from database import get_db
 
 # NEW: Import security functions
-from security import get_password_hash, verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from security import *
 from datetime import timedelta
 
 router = APIRouter(
@@ -43,21 +43,14 @@ async def register_user(
     return UserProfile(**created_user)
 
 
-# --- LOGIN (New Endpoint) ---
 @router.post("/login", response_model=Token)
 async def login_for_access_token(
-        form_data: OAuth2PasswordRequestForm = Depends(),  # Expects JSON body: { "username": "...", "password": "..." }
+        form_data: OAuth2PasswordRequestForm = Depends(),
         db: PyMongoDatabase = Depends(get_db)
 ):
-    """
-    Login endpoint. Verifies credentials and returns a JWT token.
-    """
     users_collection = db.users
-
-    # 1. Find the user by username
     user = await users_collection.find_one({"username": form_data.username})
 
-    # 2. Verify user exists AND password matches
     if not user or not verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -65,17 +58,54 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 3. Create the JWT Token
+    # 1. Create Access Token (Short lived)
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user["username"]},  # "sub" (subject) usually holds the ID or username
+        data={"sub": user["username"]},
         expires_delta=access_token_expires
     )
 
-    # 4. Return the token
-    return {"access_token": access_token, "token_type": "bearer"}
+    # 2. Create Refresh Token (Long lived)
+    refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    refresh_token = create_refresh_token(
+        data={"sub": user["username"]},
+        expires_delta=refresh_token_expires
+    )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
 
 
+# --- REFRESH TOKEN (New Endpoint) ---
+@router.post("/refresh", response_model=Token)
+async def refresh_token_func(
+        refresh_token: str = Body(..., embed=True)  # Expects JSON: { "refresh_token": "..." }
+):
+    """
+    Takes a valid refresh token and returns a new access token.
+    """
+    print("got refresh token " + refresh_token)
+    # 1. Verify the refresh token
+    username = await verify_refresh_token(refresh_token)
+
+    # 2. Create new Access Token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    new_access_token = create_access_token(
+        data={"sub": username},
+        expires_delta=access_token_expires
+    )
+
+    # Optional: You can choose to rotate the refresh token here too if you want strict security
+    # For now, we just return the original refresh token (or you can issue a new one)
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": refresh_token,  # Return the same refresh token
+        "token_type": "bearer"
+    }
 # --- PROFILE (Unchanged) ---
 @router.get("/profile/{username}", response_model=UserProfile)
 async def get_user_profile(

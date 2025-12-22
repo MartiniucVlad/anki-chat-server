@@ -31,10 +31,19 @@ class ConnectionManager:
 
         print(f"User {username} disconnected.")
 
-    async def send_personal_message(self, payload: dict, receiver_username: str):
-        if receiver_username in self.active_connections:
-            for connection in self.active_connections[receiver_username]:
-                await connection.send_json(payload)
+    async def broadcast_to_participants(self, participants: list[str], message: dict, sender: str):
+        for participant in participants:
+            if participant in self.active_connections:
+                # Get the list of sockets for this user (e.g. Phone + Laptop)
+                user_connections = self.active_connections[participant]
+
+                # Iterate over ALL their open connections
+                for websocket in user_connections:
+                    try:
+                        await websocket.send_json(message)
+                    except Exception as e:
+                        # Handle case where one specific socket might be dead
+                        print(f"Error sending to {participant}: {e}")
 
 
 # Create a global instance to be imported elsewhere

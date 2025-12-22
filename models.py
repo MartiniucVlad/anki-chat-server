@@ -3,7 +3,7 @@ from pydantic import BaseModel, EmailStr, Field
 from pydantic_core import core_schema, PydanticCustomError
 from typing import Any, Optional
 from bson import ObjectId
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone
 
 # --- MongoDB Helper for Pydantic V2 ---
@@ -60,7 +60,7 @@ class UserInDB(BaseModel):
     username: str = Field(..., min_length=3, max_length=20)
     email: EmailStr
     hashed_password: str
-    friends: List[str] = Field(default_factory=list)
+    friends: list[str] = Field(default_factory=list)
 
     class Config:
         # Renamed in V2: 'allow_population_by_field_name' -> 'validate_by_name'
@@ -97,6 +97,7 @@ class UserLogin(BaseModel):
 # 5. Schema for the Token Response
 class Token(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str
 
 
@@ -119,10 +120,27 @@ class MessageInDB(BaseModel):
     conversation_id: str
     sender: str
     content: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime
 
 # 9. How the message looks when sent to the Frontend
 class MessageOut(BaseModel):
     sender: str
     content: str
     timestamp: datetime
+
+# 10. Create conversation via request
+class CreateConversationRequest(BaseModel):
+    participants: list[str] # ["alice", "bob"] for DM, or ["alice", "bob", "charlie"] for Group
+    is_group: bool = False
+    group_name: str | None = None
+
+#11. How each conv is sent to client for the inbox display
+class ConversationSummary(BaseModel):
+    id: str
+    participants: list[str]
+    type: str
+    name: str
+    created_at: datetime
+    last_message_preview: Optional[str] = None
+    last_message_at: Optional[datetime] = None
+    unread_count: int = 0
