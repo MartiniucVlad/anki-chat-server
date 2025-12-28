@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware # <--- IMPORTS MUST BE HERE
-from database import connect_to_mongo, close_mongo_connection
+from database_mongo import connect_to_mongo, close_mongo_connection
 from routers.users import router as users_router
 from routers.friends import router as friends_router
 from routers.chat import router as chat_router

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pymongo.database import Database as PyMongoDatabase
 from models import UserRegister, UserInDB, UserProfile, UserLogin, Token
-from database import get_db
+from database_mongo import get_db
 
 # NEW: Import security functions
 from security import *

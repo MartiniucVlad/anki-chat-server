@@ -3,11 +3,13 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from websocket_manager import manager
 from jose import jwt, JWTError
 from security import SECRET_KEY, ALGORITHM, get_current_user
-from database import get_db
+from database_mongo import get_db
 from datetime import datetime, timezone
 from models import MessageInDB, CreateConversationRequest, ConversationSummary
 from pymongo.database import Database as PyMongoDatabase
 from bson import ObjectId
+import json
+from database_redis import get_redis
 
 
 
@@ -140,6 +142,17 @@ async def websocket_endpoint(
                 sender=user
             )
 
+            redis = await get_redis()
+
+            # Since the conversation list changed (new preview, new time, unread count),
+            # we must delete the cache for EVERYONE in this chat.
+            await redis.delete(f"chat_history:{conversation_id}")  # <--- ADD THIS LINE
+
+            # 2. Invalidate Sidebar for participants
+            for participant in participants:
+                cache_key = f"user_conversations:{participant}"
+                await redis.delete(cache_key)
+
     except WebSocketDisconnect:
         manager.disconnect(websocket, user)
 
@@ -147,17 +160,38 @@ async def websocket_endpoint(
 
 from fastapi import HTTPException
 
+
 @router.get("/chat/history/{conversation_id}")
 async def get_chat_history(
-    conversation_id: str,
-    current_user: str = Depends(get_current_user),
-    db: PyMongoDatabase = Depends(get_db),
+        conversation_id: str,
+        current_user: str = Depends(get_current_user),
+        db: PyMongoDatabase = Depends(get_db),
 ):
-    # 1. Validate ID format
     if not ObjectId.is_valid(conversation_id):
         raise HTTPException(status_code=400, detail="Invalid conversation ID")
 
-    # 2. Find the conversation strictly by ID
+    # --- 1. REDIS CHECK ---
+    redis = await get_redis()
+    cache_key = f"chat_history:{conversation_id}"
+
+    cached_history = await redis.get(cache_key)
+
+    if cached_history:
+        # SECURITY CHECK: Even if cached, we must ensure the user is a participant.
+        # This is a fast, lightweight query compared to fetching 100s of messages.
+        conversation = await db.conversations.find_one(
+            {"_id": ObjectId(conversation_id)},
+            {"participants": 1}
+        )
+
+        # If conversation exists and user is in it, return cache
+        if conversation and current_user in conversation.get("participants", []):
+            print(f"⚡ Cache HIT: History for {conversation_id}")
+            return json.loads(cached_history)
+
+    print(f"🐢 Cache MISS: History for {conversation_id}")
+
+    # --- 2. MONGO QUERY (Existing Logic) ---
     conversation = await db.conversations.find_one({
         "_id": ObjectId(conversation_id)
     })
@@ -165,11 +199,9 @@ async def get_chat_history(
     if not conversation:
         return []
 
-    # 3. SECURITY: Check if current_user is actually in this conversation
     if current_user not in conversation.get("participants", []):
         raise HTTPException(status_code=403, detail="Not authorized to view this chat")
 
-    # 4. Fetch messages
     cursor = db.messages.find(
         {"conversation_id": ObjectId(conversation_id)}
     ).sort("timestamp", 1)
@@ -177,10 +209,13 @@ async def get_chat_history(
     messages = []
     async for msg in cursor:
         messages.append({
-            "sender": msg["sender"], # Client expects 'sender' (check your map logic)
+            "sender": msg["sender"],
             "content": msg["content"],
             "timestamp": msg["timestamp"].isoformat()
         })
+
+    # --- 3. SAVE TO REDIS ---
+    await redis.set(cache_key, json.dumps(messages), ex=3600)
 
     return messages
 
@@ -222,14 +257,25 @@ async def get_conversation_list(
         current_user: str = Depends(get_current_user),
         db: PyMongoDatabase = Depends(get_db)
 ):
-    # 1. Find all conversations for the user
+    # --- 1. REDIS CHECK ---
+    redis = await get_redis()
+    cache_key = f"user_conversations:{current_user}"
+
+    # Try to fetch from memory first
+    cached_data = await redis.get(cache_key)
+    if cached_data:
+        print("⚡ Cache HIT: Serving from Redis")
+        return json.loads(cached_data)
+
+    print("🐢 Cache MISS: Fetching from Mongo")
+
+    # --- 2. EXISTING MONGO LOGIC (No changes needed here) ---
     cursor = db.conversations.find(
         {"participants": current_user}
     ).sort("last_message_at", -1)
 
     conversations = await cursor.to_list(length=None)
 
-    # 2. OPTIMIZATION: Fetch all unread counts
     conv_ids = [c["_id"] for c in conversations]
 
     states_cursor = db.conversation_states.find({
@@ -238,31 +284,37 @@ async def get_conversation_list(
     })
     states = await states_cursor.to_list(length=None)
 
-    # FIX: Convert ObjectId to string for the key to ensure matching works
     unread_map = {str(state["conversation_id"]): state.get("unread_count", 0) for state in states}
 
     response_list = []
 
     for conv in conversations:
-        # Name Logic
         display_name = ""
         if conv.get("type") == "private":
             other_participants = [p for p in conv["participants"] if p != current_user]
             display_name = other_participants[0] if other_participants else "Me"
         else:
             display_name = conv.get("name", "Unnamed Group")
+
+        # Helper to handle datetime serialization
+        def serialize_date(d):
+            return d.isoformat() if isinstance(d, datetime) else d
+
         response_list.append({
             "id": str(conv["_id"]),
             "participants": conv["participants"],
             "type": conv["type"],
             "name": display_name,
-            "created_at": conv["created_at"],
+            "created_at": serialize_date(conv["created_at"]),
             "last_message_preview": conv.get("last_message_preview"),
-            "last_message_at": conv.get("last_message_at"),
-            # FIX: Lookup using string ID
+            "last_message_at": serialize_date(conv.get("last_message_at")),
             "unread_count": unread_map.get(str(conv["_id"]), 0)
         })
-    print(response_list)
+
+    # --- 3. SAVE TO REDIS ---
+    # Save the result for 1 hour (3600 seconds)
+    await redis.set(cache_key, json.dumps(response_list), ex=3600)
+
     return response_list
 
 
@@ -283,5 +335,7 @@ async def mark_read(conv_id: str, user=Depends(get_current_user), db: PyMongoDat
         },
         upsert=True
     )
+    redis = await get_redis()
+    await redis.delete(f"user_conversations:{user}")
 
 

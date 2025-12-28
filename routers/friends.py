@@ -1,7 +1,7 @@
 # backend/routers/friends.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from pymongo.database import Database as PyMongoDatabase
-from database import get_db
+from database_mongo import get_db
 from security import get_current_user  # We will create this dependency next
 from models import FriendRequestInDB, UserProfile
 from datetime import datetime
