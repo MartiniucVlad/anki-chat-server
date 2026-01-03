@@ -45,6 +45,16 @@ class ConnectionManager:
                         # Handle case where one specific socket might be dead
                         print(f"Error sending to {participant}: {e}")
 
+    async def send_personal_message(self, message: dict, username: str):
+        """
+        Sends a message ONLY to the specific user (e.g. Anki updates, system alerts).
+        """
+        if username in self.active_connections:
+            for websocket in self.active_connections[username]:
+                try:
+                    await websocket.send_json(message)
+                except Exception as e:
+                    print(f"Error sending personal message to {username}: {e}")
 
 # Create a global instance to be imported elsewhere
 manager = ConnectionManager()

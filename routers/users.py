@@ -1,9 +1,9 @@
 # routers/users.py
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from pymongo.database import Database as PyMongoDatabase
-from models import UserRegister, UserInDB, UserProfile, UserLogin, Token
-from database_mongo import get_db
+from models import UserRegister, UserInDB, UserProfile, Token
+from database_clients.database_mongo import get_db
 
 # NEW: Import security functions
 from security import *

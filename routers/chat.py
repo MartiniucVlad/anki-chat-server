@@ -1,17 +1,20 @@
 # backend/routers/chat.py
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+
+from fastapi import APIRouter
 from websocket_manager import manager
 from jose import jwt, JWTError
 from security import SECRET_KEY, ALGORITHM, get_current_user
-from database_mongo import get_db
-from datetime import datetime, timezone
-from models import MessageInDB, CreateConversationRequest, ConversationSummary
+from database_clients.database_mongo import get_db
+from models import CreateConversationRequest, ConversationSummary
 from pymongo.database import Database as PyMongoDatabase
-from bson import ObjectId
 import json
-from database_redis import get_redis
-
-
+from database_clients.database_redis import get_redis
+import asyncio
+from message_handling.search_service import *
+from bson import ObjectId
+from datetime import datetime, timezone
+from fastapi import WebSocket, WebSocketDisconnect, Query, Depends, HTTPException
+from message_handling.message_anki_validation import validate_anki_message # Import the new function
 
 router = APIRouter(tags=["Chat"])
 
@@ -52,9 +55,7 @@ async def get_or_create_conversation_id(user1: str, user2: str, db: PyMongoDatab
 
 
 # --- The WebSocket Endpoint ---
-from bson import ObjectId
-from datetime import datetime, timezone
-from fastapi import WebSocket, WebSocketDisconnect, Query, Depends
+
 
 @router.websocket("/ws/chat")
 async def websocket_endpoint(
@@ -72,8 +73,8 @@ async def websocket_endpoint(
     try:
         while True:
             data = await websocket.receive_json()
-
-            # Expected: { "conversation_id": "...", "content": "..." }
+            print(data)
+            # Expected: { "conversation_id": "...", "content": "...", "selectedDeck" : "..." }
             conversation_id = data.get("conversation_id")
             content = data.get("content")
 
@@ -90,6 +91,20 @@ async def websocket_endpoint(
 
             participants = conversation.get("participants", [])
 
+            # If an anki deck is selected, we make an async task calling
+            # function to send the message content for anki verification
+            deck_name = data.get("deck_name")
+            if deck_name:
+                asyncio.create_task(
+                    validate_anki_message(
+                        user=user,
+                        content=content,
+                        deck_name=deck_name,
+                        participants=participants,  # <--- Pass the list here
+                        manager=manager
+                    )
+                )
+
             now = datetime.now(timezone.utc)
 
             # 2. Persist message
@@ -99,7 +114,9 @@ async def websocket_endpoint(
                 "content": content,
                 "timestamp": now
             }
-            await db.messages.insert_one(msg_entry)
+            insert_result = await db.messages.insert_one(msg_entry)
+            new_message_id = str(insert_result.inserted_id)
+
             # we update the number of unread messages for user
             for participant in participants:
                 if participant == user:
@@ -127,13 +144,22 @@ async def websocket_endpoint(
                     }
                 }
             )
+            asyncio.create_task(
+                index_message(
+                    mongo_id=new_message_id,
+                    content=content,
+                    conversation_id=conversation_id,
+                    sender=user,
+                    timestamp=now
+                )
+            )
 
             # 4. Broadcast to participants
             message_payload = {
                 "conversation_id": conversation_id,
                 "from": user,
                 "content": content,
-                "timestamp": now.isoformat()
+                "timestamp": now.isoformat()[:23]
             }
 
             await manager.broadcast_to_participants(
@@ -211,8 +237,10 @@ async def get_chat_history(
         messages.append({
             "sender": msg["sender"],
             "content": msg["content"],
-            "timestamp": msg["timestamp"].isoformat()
+            "timestamp": msg["timestamp"].isoformat()[:23]
+
         })
+        print(msg["timestamp"].isoformat()[:23])
 
     # --- 3. SAVE TO REDIS ---
     await redis.set(cache_key, json.dumps(messages), ex=3600)
@@ -339,3 +367,19 @@ async def mark_read(conv_id: str, user=Depends(get_current_user), db: PyMongoDat
     await redis.delete(f"user_conversations:{user}")
 
 
+@router.get("/chat/search/semantic")
+async def search_messages(
+        query: str,
+        conversation_id: str = None,  # Optional: leave empty to search ALL chats
+        current_user: str = Depends(get_current_user)
+):
+    if not query:
+        return []
+
+    results = await search_similar_messages(
+        query=query,
+        limit=5,
+        conversation_id=conversation_id
+    )
+
+    return results

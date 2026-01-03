@@ -1,10 +1,11 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware # <--- IMPORTS MUST BE HERE
-from database_mongo import connect_to_mongo, close_mongo_connection
+from database_clients.database_mongo import connect_to_mongo, close_mongo_connection
 from routers.users import router as users_router
 from routers.friends import router as friends_router
 from routers.chat import router as chat_router
+from routers.anki import router as anki_router
 import contextlib
 
 @contextlib.asynccontextmanager
@@ -30,6 +31,7 @@ app.add_middleware(
 app.include_router(users_router)
 app.include_router(friends_router)
 app.include_router(chat_router)
+app.include_router(anki_router)
 
 @app.get("/")
 async def root():

@@ -144,3 +144,16 @@ class ConversationSummary(BaseModel):
     last_message_preview: Optional[str] = None
     last_message_at: Optional[datetime] = None
     unread_count: int = 0
+
+
+class AnkiNote(BaseModel):
+    id : str
+    front : str
+    back: str
+    mod: int
+    is_reviewed: bool = False
+
+
+class AnkiDeckNotes(BaseModel):
+    deck_name: str
+    notes: list[AnkiNote]
