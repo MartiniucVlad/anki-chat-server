@@ -1,18 +1,12 @@
 # backend/routers/chat.py
 
 from fastapi import APIRouter
-from websocket_manager import manager
-from jose import jwt, JWTError
-from security import SECRET_KEY, ALGORITHM, get_current_user
-from database_clients.database_mongo import get_db
-from models import AnkiNote, AnkiDeckNotes
-from pymongo.database import Database as PyMongoDatabase
+from security import get_current_user
+from models import AnkiDeckNotes
 import json
 from database_clients.database_redis import get_redis
-import asyncio
-from message_handling.search_service import *
-from datetime import datetime, timezone
-from fastapi import WebSocket, WebSocketDisconnect, Query, Depends
+
+from fastapi import Depends
 
 
 

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from qdrant_client.models import PointStruct, VectorParams, Distance
 from database_clients.database_qdrant import get_qdrant
-from message_handling.messages_embeddings import get_embedding
+from messages_sever_processing.messages_embeddings import get_embedding
 
 # We use a constant collection name
 COLLECTION_NAME = "messages"

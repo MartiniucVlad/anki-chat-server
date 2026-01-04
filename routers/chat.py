@@ -1,35 +1,17 @@
 # backend/routers/chat.py
 
 from fastapi import APIRouter
-from websocket_manager import manager
-from jose import jwt, JWTError
-from security import SECRET_KEY, ALGORITHM, get_current_user
+from security import get_current_user
 from database_clients.database_mongo import get_db
 from models import CreateConversationRequest, ConversationSummary
 from pymongo.database import Database as PyMongoDatabase
 import json
 from database_clients.database_redis import get_redis
-import asyncio
-from message_handling.search_service import *
 from bson import ObjectId
 from datetime import datetime, timezone
-from fastapi import WebSocket, WebSocketDisconnect, Query, Depends, HTTPException
-from message_handling.message_anki_validation import validate_anki_message # Import the new function
+from fastapi import Depends
 
 router = APIRouter(tags=["Chat"])
-
-
-# --- Helper to validate Token via Query Param ---
-async def get_current_user_ws(token: str):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            return None
-        return username
-    except JWTError:
-        return None
-
 
 # --- Helper: Find or Create Conversation ---
 async def get_or_create_conversation_id(user1: str, user2: str, db: PyMongoDatabase) -> str:
@@ -57,134 +39,134 @@ async def get_or_create_conversation_id(user1: str, user2: str, db: PyMongoDatab
 # --- The WebSocket Endpoint ---
 
 
-@router.websocket("/ws/chat")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    token: str = Query(...),
-    db: PyMongoDatabase = Depends(get_db)
-):
-    user = await get_current_user_ws(token)
-    if not user:
-        await websocket.close(code=4003)
-        return
-
-    await manager.connect(websocket, user)
-
-    try:
-        while True:
-            data = await websocket.receive_json()
-            print(data)
-            # Expected: { "conversation_id": "...", "content": "...", "selectedDeck" : "..." }
-            conversation_id = data.get("conversation_id")
-            content = data.get("content")
-
-            if not conversation_id or not content:
-                continue
-
-            # 1. Fetch conversation
-            conversation = await db.conversations.find_one({
-                "_id": ObjectId(conversation_id)
-            })
-
-            if not conversation:
-                continue
-
-            participants = conversation.get("participants", [])
-
-            # If an anki deck is selected, we make an async task calling
-            # function to send the message content for anki verification
-            deck_name = data.get("deck_name")
-            if deck_name:
-                asyncio.create_task(
-                    validate_anki_message(
-                        user=user,
-                        content=content,
-                        deck_name=deck_name,
-                        participants=participants,  # <--- Pass the list here
-                        manager=manager
-                    )
-                )
-
-            now = datetime.now(timezone.utc)
-
-            # 2. Persist message
-            msg_entry = {
-                "conversation_id": ObjectId(conversation_id),
-                "sender": user,
-                "content": content,
-                "timestamp": now
-            }
-            insert_result = await db.messages.insert_one(msg_entry)
-            new_message_id = str(insert_result.inserted_id)
-
-            # we update the number of unread messages for user
-            for participant in participants:
-                if participant == user:
-                    continue
-                await db.conversation_states.update_one(
-                    {
-                        "conversation_id": ObjectId(conversation_id),
-                        "user": participant
-                    },
-                    {
-                        "$inc": {"unread_count": 1},
-                        "$set": {"updated_at": now}
-                    },
-                    upsert=True
-                )
-
-            preview = content if len(content) <= 10 else content[:10] + "..."
-            # other useful info held by the conversation
-            await db.conversations.update_one(
-                {"_id": ObjectId(conversation_id)},
-                {
-                    "$set": {
-                        "last_message_at": now,
-                        "last_message_preview": preview
-                    }
-                }
-            )
-            asyncio.create_task(
-                index_message(
-                    mongo_id=new_message_id,
-                    content=content,
-                    conversation_id=conversation_id,
-                    sender=user,
-                    timestamp=now
-                )
-            )
-
-            # 4. Broadcast to participants
-            message_payload = {
-                "conversation_id": conversation_id,
-                "from": user,
-                "content": content,
-                "timestamp": now.isoformat()[:23]
-            }
-
-            await manager.broadcast_to_participants(
-                participants,
-                message_payload,
-                sender=user
-            )
-
-            redis = await get_redis()
-
-            # Since the conversation list changed (new preview, new time, unread count),
-            # we must delete the cache for EVERYONE in this chat.
-            await redis.delete(f"chat_history:{conversation_id}")  # <--- ADD THIS LINE
-
-            # 2. Invalidate Sidebar for participants
-            for participant in participants:
-                cache_key = f"user_conversations:{participant}"
-                await redis.delete(cache_key)
-
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, user)
-
-
-
 from fastapi import HTTPException
+
+
+
+# @router.websocket("/ws/chat")
+# async def websocket_endpoint(
+#     websocket: WebSocket,
+#     token: str = Query(...),
+#     db: PyMongoDatabase = Depends(get_db)
+# ):
+#     user = await get_current_user_ws(token)
+#     if not user:
+#         await websocket.close(code=4003)
+#         return
+#
+#     await manager.connect(websocket, user)
+#
+#     try:
+#         while True:
+#             data = await websocket.receive_json()
+#             print(data)
+#             # Expected: { "conversation_id": "...", "content": "...", "selectedDeck" : "..." }
+#             conversation_id = data.get("conversation_id")
+#             content = data.get("content")
+#
+#             if not conversation_id or not content:
+#                 continue
+#
+#             # 1. Fetch conversation
+#             conversation = await db.conversations.find_one({
+#                 "_id": ObjectId(conversation_id)
+#             })
+#
+#             if not conversation:
+#                 continue
+#
+#             participants = conversation.get("participants", [])
+#
+#             # If an anki deck is selected, we make an async task calling
+#             # function to send the message content for anki verification
+#             deck_name = data.get("deck_name")
+#             if deck_name:
+#                 asyncio.create_task(
+#                     validate_anki_message(
+#                         user=user,
+#                         content=content,
+#                         deck_name=deck_name,
+#                         participants=participants,  # <--- Pass the list here
+#                         manager=manager
+#                     )
+#                 )
+#
+#             now = datetime.now(timezone.utc)
+#
+#             # 2. Persist message
+#             msg_entry = {
+#                 "conversation_id": ObjectId(conversation_id),
+#                 "sender": user,
+#                 "content": content,
+#                 "timestamp": now
+#             }
+#             insert_result = await db.messages.insert_one(msg_entry)
+#             new_message_id = str(insert_result.inserted_id)
+#
+#             # we update the number of unread messages for user
+#             for participant in participants:
+#                 if participant == user:
+#                     continue
+#                 await db.conversation_states.update_one(
+#                     {
+#                         "conversation_id": ObjectId(conversation_id),
+#                         "user": participant
+#                     },
+#                     {
+#                         "$inc": {"unread_count": 1},
+#                         "$set": {"updated_at": now}
+#                     },
+#                     upsert=True
+#                 )
+#
+#             preview = content if len(content) <= 10 else content[:10] + "..."
+#             # other useful info held by the conversation
+#             await db.conversations.update_one(
+#                 {"_id": ObjectId(conversation_id)},
+#                 {
+#                     "$set": {
+#                         "last_message_at": now,
+#                         "last_message_preview": preview
+#                     }
+#                 }
+#             )
+#             asyncio.create_task(
+#                 index_message(
+#                     mongo_id=new_message_id,
+#                     content=content,
+#                     conversation_id=conversation_id,
+#                     sender=user,
+#                     timestamp=now
+#                 )
+#             )
+#
+#             # 4. Broadcast to participants
+#             message_payload = {
+#                 "conversation_id": conversation_id,
+#                 "from": user,
+#                 "content": content,
+#                 "timestamp": now.isoformat()[:23]
+#             }
+#
+#             await manager.broadcast_to_participants(
+#                 participants,
+#                 message_payload,
+#                 sender=user
+#             )
+#
+#             redis = await get_redis()
+#
+#             # Since the conversation list changed (new preview, new time, unread count),
+#             # we must delete the cache for EVERYONE in this chat.
+#             await redis.delete(f"chat_history:{conversation_id}")  # <--- ADD THIS LINE
+#
+#             # 2. Invalidate Sidebar for participants
+#             for participant in participants:
+#                 cache_key = f"user_conversations:{participant}"
+#                 await redis.delete(cache_key)
+#
+#     except WebSocketDisconnect:
+#         manager.disconnect(websocket, user)
 
 
 @router.get("/chat/history/{conversation_id}")

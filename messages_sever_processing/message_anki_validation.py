@@ -56,19 +56,18 @@ async def validate_anki_message(user: str, content: str, deck_name: str, partici
         await redis.set(redis_key, json.dumps(session_data), ex=86400)
 
         # B. Broadcast to Everyone
-        for item in newly_reviewed_ids:
-            payload = {
-                "type": "learning_update",
-                "note_id": item["id"],
-                "word": item["word"],
-                "deck_name": deck_name,
-                "learner": user,  # Important: Frontend needs to know WHO learned it
-                "timestamp": str(datetime.now(timezone.utc))
-            }
-
-            # Using the broadcast method as requested
-            await manager.broadcast_to_participants(
-                participants,
-                payload,
-                sender=user
-            )
+        payload = {
+            "type": "learning_update",
+            "ticked_notes": newly_reviewed_ids,
+            "message_review" : "testString", # Ai review that points out errors  in the user's message
+            "deck_name": deck_name,
+            "learner": user,
+            "timestamp": str(datetime.now(timezone.utc))
+        }
+        print(payload)
+        # Using the broadcast method as requested
+        await manager.broadcast_to_participants(
+            participants=participants,
+            message=payload,
+            sender=user
+        )
