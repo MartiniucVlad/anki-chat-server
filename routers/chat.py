@@ -1,6 +1,8 @@
 # backend/routers/chat.py
 
 from fastapi import APIRouter
+
+from messages_sever_processing.semantic_search_messages import search_similar_messages
 from security import get_current_user
 from database_clients.database_mongo import get_db
 from models import CreateConversationRequest, ConversationSummary
@@ -185,6 +187,7 @@ async def get_chat_history(
     cached_history = await redis.get(cache_key)
 
     if cached_history:
+        print(cached_history)
         # SECURITY CHECK: Even if cached, we must ensure the user is a participant.
         # This is a fast, lightweight query compared to fetching 100s of messages.
         conversation = await db.conversations.find_one(
@@ -203,7 +206,7 @@ async def get_chat_history(
     conversation = await db.conversations.find_one({
         "_id": ObjectId(conversation_id)
     })
-
+    print(conversation)
     if not conversation:
         return []
 
@@ -217,12 +220,12 @@ async def get_chat_history(
     messages = []
     async for msg in cursor:
         messages.append({
+            "message_id": str(msg["_id"]),
             "sender": msg["sender"],
             "content": msg["content"],
             "timestamp": msg["timestamp"].isoformat()[:23]
 
         })
-        print(msg["timestamp"].isoformat()[:23])
 
     # --- 3. SAVE TO REDIS ---
     await redis.set(cache_key, json.dumps(messages), ex=3600)
@@ -231,8 +234,17 @@ async def get_chat_history(
 
 
 @router.post("/chat/conversations/initiate")
-async def initiate_conversation(req: CreateConversationRequest, db: PyMongoDatabase = Depends(get_db)):
-    # Logic for Private Chat (DM) - Idempotent
+async def initiate_conversation(
+        req: CreateConversationRequest,
+        db: PyMongoDatabase = Depends(get_db),
+        current_user: str = Depends(get_current_user),
+):
+
+    #invalidate redis current conversation list
+    redis = await get_redis()
+    await redis.delete(f"user_conversations:{current_user}")
+
+
     if not req.is_group:
         # Sort to ensure uniqueness for DMs
         participants = sorted(req.participants)

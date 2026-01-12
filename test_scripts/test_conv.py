@@ -1,4 +1,3 @@
-# scripts/generate_test_data.py
 import asyncio
 import sys
 import os
@@ -6,13 +5,20 @@ from datetime import datetime, timedelta
 from bson import ObjectId
 
 # Setup paths to import backend modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
+# Get the directory of the current script
+current_dir = os.path.dirname(os.path.abspath(__file__))
 
-from database_clients.database_mongo import connect_to_mongo, close_mongo_connection, get_db
-from message_handling.search_service import index_message, ensure_collection_exists
+# Go up one level to the project root (mchatpr)
+project_root = os.path.dirname(current_dir)
+
+# Add the project root to sys.path
+sys.path.append(project_root)
+
+from database_clients.database_mongo import *
+from messages_sever_processing.semantic_search_messages import index_message, ensure_collection_exists
 
 # --- CONFIGURATION ---
-TARGET_CONVERSATION_ID = "6953b10eee783741b2ae5fca"  # <--- YOUR GROUP ID
+TARGET_CONVERSATION_ID = "695a99a525be08b181a1e1e2"  # <--- YOUR GROUP ID
 USER_A = "relu1"
 USER_B = "relu2"
 
@@ -62,7 +68,7 @@ async def generate_conversation():
     print("🚀 Inserting messages...")
 
     # Start time: 3 hours ago, spaced out by 5 minutes
-    start_time = datetime.now() - timedelta(hours=3)
+    start_time = datetime.now() - timedelta(hours=10)
 
     for i, (sender, content) in enumerate(dialogue):
         msg_time = start_time + timedelta(minutes=i * 5)
@@ -78,7 +84,7 @@ async def generate_conversation():
 
         # B. Index into Qdrant
         await index_message(
-            mongo_id=msg_id,
+            message_id=msg_id,
             content=content,
             conversation_id=TARGET_CONVERSATION_ID,
             sender=sender,

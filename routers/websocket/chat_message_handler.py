@@ -3,8 +3,8 @@ from bson import ObjectId
 from datetime import datetime, timezone
 import asyncio
 from database_clients.database_redis import get_redis
-from messages_sever_processing.message_anki_validation import validate_anki_message
-from messages_sever_processing.search_service import index_message
+from messages_sever_processing.message_anki_processing import validate_anki_message
+from messages_sever_processing.semantic_search_messages import index_message
 
 async def handle_chat_message(user: str, data: dict, db, manager):
     """
@@ -27,21 +27,9 @@ async def handle_chat_message(user: str, data: dict, db, manager):
 
     participants = conversation.get("participants", [])
 
-    # 2. Anki Validation Trigger (Async)
-    if deck_name:
-        asyncio.create_task(
-            validate_anki_message(
-                user=user,
-                content=content,
-                deck_name=deck_name,
-                participants=participants,
-                manager=manager
-            )
-        )
-
     now = datetime.now(timezone.utc)
 
-    # 3. Persist Message
+    # 2. Persist Message
     msg_entry = {
         "conversation_id": ObjectId(conversation_id),
         "sender": user,
@@ -49,7 +37,20 @@ async def handle_chat_message(user: str, data: dict, db, manager):
         "timestamp": now
     }
     insert_result = await db.messages.insert_one(msg_entry)
-    new_message_id = str(insert_result.inserted_id)
+    message_id = str(insert_result.inserted_id)
+
+    # 2. Anki Validation Trigger (Async)
+    if deck_name:
+        asyncio.create_task(
+            validate_anki_message(
+                message_id=message_id,
+                user=user,
+                content=content,
+                deck_name=deck_name,
+                participants=participants,
+                manager=manager
+            )
+        )
 
     # 4. Update Conversation Stats (Unread counts, Last message)
     # Note: You could extract this into a separate 'update_conversation_stats' helper function
@@ -82,7 +83,7 @@ async def handle_chat_message(user: str, data: dict, db, manager):
     # 5. Semantic Search Indexing (Async)
     asyncio.create_task(
         index_message(
-            mongo_id=new_message_id,
+            message_id=message_id,
             content=content,
             conversation_id=conversation_id,
             sender=user,
@@ -94,6 +95,7 @@ async def handle_chat_message(user: str, data: dict, db, manager):
     # IMPORTANT: Ensure 'type' is included so the Client Dispatcher knows what to do
     message_payload = {
         "type": "chat_message",  # <--- Standardize this
+        "message_id": message_id,
         "conversation_id": conversation_id,
         "from": user,
         "content": content,

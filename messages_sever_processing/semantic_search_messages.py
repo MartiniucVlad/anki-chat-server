@@ -25,7 +25,7 @@ def ensure_collection_exists():
         )
 
 async def index_message(
-    mongo_id: str,
+    message_id: str,
     content: str,
     conversation_id: str,
     sender: str,
@@ -55,7 +55,7 @@ async def index_message(
                 id=point_id,
                 vector=vector,
                 payload={
-                    "mongo_id": mongo_id,
+                    "message_id": message_id,
                     "content": content,
                     "conversation_id": conversation_id,
                     "sender": sender,
@@ -64,7 +64,6 @@ async def index_message(
             )
         ]
     )
-    print(f"Indexed message {mongo_id} in Qdrant.")
 
 async def search_similar_messages(query: str, limit: int = 5, conversation_id: str = None):
     """
@@ -104,6 +103,7 @@ async def search_similar_messages(query: str, limit: int = 5, conversation_id: s
     results = []
     for hit in search_result:
         results.append({
+            "messageId": hit.payload.get("message_id"),
             "content": hit.payload.get("content"),
             "sender": hit.payload.get("sender"),
             "timestamp": hit.payload.get("timestamp"),
