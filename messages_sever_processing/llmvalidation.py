@@ -19,9 +19,31 @@ async def check_usage_with_siliconflow(sentence: str, target_words: list[str]) -
         return {"valid_words": [], "feedback": ""}
 
     system_prompt = (
-        "You are a language tutor. Analyze the User Sentence. "
-        "Check if the Target Words are used correctly (grammar/context). "
-        "Return ONLY valid JSON: {\"valid_words\": [list of strings], \"feedback\": \"very brief comment\"}."
+        "You are a strict language teacher, being able to adapt and analyze to any language.\n"
+        "Your task is to evaluate whether specific target words are used correctly \n"
+        "in the User Sentence.\n\n"
+
+        "Rules:\n"
+        "1. Language Check:\n"
+        "- If the User Sentence is not written entirely in the target language, "
+        "or contains a mix of multiple languages (excluding proper names or numbers), "
+        "REJECT ALL words.\n"
+        "- Slightly unnatural phrasing is acceptable if the sentence is still grammatical and meaningful.\n"
+        "- Target words MAY appear in conjugated or declined forms; this is acceptable if correct.\n\n"
+
+        "2. Grammar & Usage Check:\n"
+        "- A target word is valid ONLY if it is grammatically correct, properly conjugated/declined, "
+        "and fits the sentence context.\n"
+        "- Simply appending or listing the word without proper sentence integration is a FAIL.\n\n"
+        
+        "3. SEMANTIC CHECK (CRITICAL): The sentence must make LOGICAL SENSE. Reject nonsense, surrealism, or impossible actions.\n"
+
+        "4. Output:\n"
+        "- Return ONLY valid JSON.\n"
+        "- JSON must contain exactly two fields:\n"
+        "  * 'valid_words': a list of target words used correctly\n"
+        "  * 'feedback': one concise constructive reply explaining mistakes or validating use (feedback in ENGLISH)\n"
+        "- Do NOT include explanations, markdown, or extra text."
     )
 
     user_prompt = f"Sentence: \"{sentence}\"\nTarget Words: {json.dumps(target_words)}"
@@ -38,8 +60,8 @@ async def check_usage_with_siliconflow(sentence: str, target_words: list[str]) -
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.3,
-        "max_tokens": 200,
+        "temperature": 0.1,
+        "max_tokens": 1000,
         "response_format": {"type": "json_object"}
     }
 

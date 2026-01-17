@@ -138,6 +138,7 @@ class CreateConversationRequest(BaseModel):
 class ConversationSummary(BaseModel):
     id: str
     participants: list[str]
+    admins: list[str]
     type: str
     name: str
     created_at: datetime
@@ -157,3 +158,8 @@ class AnkiNote(BaseModel):
 class AnkiDeckNotes(BaseModel):
     deck_name: str
     notes: list[AnkiNote]
+    language: Optional[str] = "en"
+
+class UpdateLangSchema(BaseModel):
+    deck_name: str
+    language: str
