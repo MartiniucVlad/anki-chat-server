@@ -7,6 +7,7 @@ from routers.friends import router as friends_router
 from routers.chat import router as chat_router
 from routers.anki import router as anki_router
 from routers.websocket.ws_hub import router as ws_hub_router
+from routers.stories import router as stories_router
 import contextlib
 
 @contextlib.asynccontextmanager
@@ -34,6 +35,7 @@ app.include_router(friends_router)
 app.include_router(chat_router)
 app.include_router(anki_router)
 app.include_router(ws_hub_router)
+app.include_router(stories_router)
 
 @app.get("/")
 async def root():
