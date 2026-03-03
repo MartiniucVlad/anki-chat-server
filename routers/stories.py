@@ -615,9 +615,6 @@ async def get_story_chunk(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid story ID format.")
 
-    ##################
-
-    ##############
 
     # Verify the user has access to the parent story first
     story = await db.stories.find_one(
@@ -716,3 +713,49 @@ async def update_story(
     await redis.delete(f"stories:list:{current_user}")
 
     return {"story_id": story_id, "updated": updates}
+
+
+
+
+from fastapi.responses import StreamingResponse
+from ollama import chat as ollama_chat
+
+class ExplainRequest(BaseModel):
+    selected_text: str
+    story_id: Optional[str] = None  # for future context injection
+
+@router.post("/explain")
+async def explain_selection(
+    req: ExplainRequest,
+    current_user: str = Depends(get_current_user),
+):
+    if not req.selected_text.strip():
+        raise HTTPException(status_code=400, detail="No text provided.")
+    if len(req.selected_text) > 2000:
+        raise HTTPException(status_code=400, detail="Selection too long.")
+
+    system_prompt = """You are a German language tutor embedded in a reading app.
+The user has selected a passage from a German text they are reading.
+Explain it clearly and helpfully. Cover:
+- What the passage means in natural English
+- Any interesting grammar structures (cases, verb forms, word order)
+- Any vocabulary worth highlighting (idioms, compound words, tricky words)
+Keep it concise — 3 to 6 sentences. Use simple English. Do not repeat the German text back in full."""
+
+    user_message = f'The user selected this German text:\n\n"{req.selected_text}"\n\nPlease explain it.'
+
+    def generate():
+        stream = ollama_chat(
+            model="kimi-k2.5:cloud",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            stream=True,
+        )
+        for chunk in stream:
+            content = chunk.message.content
+            if content:
+                yield content
+
+    return StreamingResponse(generate(), media_type="text/plain")
