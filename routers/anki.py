@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from security import get_current_user
-from models import AnkiDeckNotes, UpdateLangSchema
+from models.chat_models import AnkiDeckNotes, UpdateLangSchema
 import json
 from database_clients.database_redis import get_redis
 from messages_sever_processing.anki_utils import detect_deck_language

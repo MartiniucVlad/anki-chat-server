@@ -5,14 +5,12 @@ from fastapi import APIRouter
 from messages_sever_processing.semantic_search_messages import search_similar_messages
 from security import get_current_user
 from database_clients.database_mongo import get_db
-from models import CreateConversationRequest, ConversationSummary
+from models.chat_models import CreateConversationRequest, ConversationSummary
 from pymongo.database import Database as PyMongoDatabase
 import json
 from database_clients.database_redis import get_redis
-from bson import ObjectId
 from datetime import datetime, timezone
-from fastapi import Depends, HTTPException
-
+from fastapi import Depends
 
 router = APIRouter(tags=["Chat"])
 
@@ -106,6 +104,8 @@ async def get_chat_history(
                 "messageReview": db_review.get("message_review", ""),
                 "deckName": db_review.get("deck_name", ""),
             }
+        if "story_attachment" in msg:
+            msg_obj["story_attachment"] = msg["story_attachment"]
 
         messages.append(msg_obj)
 
@@ -158,7 +158,7 @@ async def initiate_conversation(
         return {"conversation_id": str(new_group.inserted_id)}
 
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Depends, HTTPException
 from bson import ObjectId
 
 
